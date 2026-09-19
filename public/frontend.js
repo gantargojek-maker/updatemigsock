@@ -525,35 +525,38 @@ function populateTargetsFromUsers(){
   const nextTargets=[];
   const used=new Set();
 
-  // Target hanya berasal dari List User, bukan dari nama Socket 1-10.
-  // Untuk setiap nama socket, cari NAMA LAIN di List User yang paling sama.
-  // Nama socket sendiri dilarang menjadi target.
-  for(const socketName of socketNames){
-    const socketKey=normalizeTargetName(socketName);
-    let best=null;
-    let bestScore=0;
+  // Socket names are only clues. They are never allowed as target values.
+  while(nextTargets.length<10){
+    let best=null, bestScore=0;
 
-    for(const user of users){
-      const key=normalizeTargetName(user);
-      if(!key || key===socketKey || socketKeys.has(key) || used.has(key)) continue;
+    for(const socketName of socketNames){
+      for(const user of users){
+        const key=normalizeTargetName(user);
+        if(!key || socketKeys.has(key) || used.has(key)) continue;
 
-      const score=targetNameSimilarity(socketName,user);
-      if(score>bestScore){
-        bestScore=score;
-        best=user;
+        const score=targetNameSimilarity(socketName,user);
+        if(score>bestScore){
+          bestScore=score;
+          best=user;
+        }
       }
     }
 
-    if(best){
-      const key=normalizeTargetName(best);
-      used.add(key);
-      nextTargets.push(best);
-    }
+    if(!best) break;
+
+    const key=normalizeTargetName(best);
+    if(socketKeys.has(key) || used.has(key)) break;
+
+    used.add(key);
+    nextTargets.push(best);
   }
 
-  // Maksimal 10 target unik. Tidak mengisi slot dengan nama socket.
   targets.length=0;
-  nextTargets.slice(0,10).forEach(n=>targets.push(n));
+  nextTargets
+    .filter(n=>!socketKeys.has(normalizeTargetName(n)))
+    .slice(0,10)
+    .forEach(n=>targets.push(n));
+
   renderTargets();
 }
 
