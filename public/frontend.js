@@ -476,6 +476,7 @@ function renderParticipants(list, merge=true){
       <span class="text-xs sm:text-sm text-slate-200 truncate">${esc(n)}</span>
     </label>
   `).join("");
+  populateTargetsFromUsers();
 }
 
 function clearParticipants(){
@@ -494,93 +495,66 @@ function syncCheckedTargets(){
 // Kompatibilitas tombol lama: pertahankan target yang sudah ada.
 function moveCheckedToTargets(){ return; }
 
-// Auto Target 10:
-// - mengambil kandidat dari List User
-// - tidak memilih nama troop sendiri
-// - memprioritaskan nama yang paling mirip dengan nama troop
-// - setiap target hanya dipakai sekali selama kandidat unik masih tersedia
 function normalizeTargetName(value){
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, "");
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function targetSimilarity(a, b){
-  const x = normalizeTargetName(a);
-  const y = normalizeTargetName(b);
-  if(!x || !y) return 0;
-  if(x === y) return 0; // identitas sendiri dilarang
-
-  // Levenshtein similarity, tanpa dependency tambahan.
-  const prev = Array(y.length + 1);
-  const curr = Array(y.length + 1);
+function targetNameSimilarity(a, b){
+  const x=normalizeTargetName(a), y=normalizeTargetName(b);
+  if(!x || !y || x===y) return 0;
+  const prev=Array(y.length+1), curr=Array(y.length+1);
   for(let j=0;j<=y.length;j++) prev[j]=j;
   for(let i=1;i<=x.length;i++){
     curr[0]=i;
     for(let j=1;j<=y.length;j++){
-      const cost = x[i-1] === y[j-1] ? 0 : 1;
-      curr[j] = Math.min(
-        curr[j-1] + 1,
-        prev[j] + 1,
-        prev[j-1] + cost
-      );
+      const cost=x[i-1]===y[j-1]?0:1;
+      curr[j]=Math.min(curr[j-1]+1,prev[j]+1,prev[j-1]+cost);
     }
     for(let j=0;j<=y.length;j++) prev[j]=curr[j];
   }
-  const distance = prev[y.length];
-  return 1 - (distance / Math.max(x.length, y.length));
+  return 1-(prev[y.length]/Math.max(x.length,y.length));
 }
 
-function autoTarget10(){
-  const users = [...new Set(participantNames.map(n => String(n ?? "").trim()).filter(Boolean))];
-  if(!users.length){
-    renderTargets();
-    return;
-  }
+// Otomatis mengisi maksimal 10 target sesuai urutan Socket 1-10.
+// Setiap socket mencari user List User yang namanya paling mirip,
+// tetapi tidak boleh memilih nama socket itu sendiri.
+function populateTargetsFromUsers(){
+  const users=[...new Set(participantNames.map(n=>String(n ?? "").trim()).filter(Boolean))];
+  const socketNames=accounts.map(a=>String(a?.username ?? "").trim()).filter(Boolean);
+  const socketKeys=new Set(socketNames.map(normalizeTargetName).filter(Boolean));
+  const nextTargets=[];
+  const used=new Set();
 
-  // Nama troop diambil dari username account yang sedang terisi.
-  const troopNames = accounts.map(a => String(a?.username ?? "").trim());
-
-  const selected = [];
-  const used = new Set();
-
-  // Satu kandidat terbaik untuk setiap troop, maksimal 10 troop.
-  for(let i=0; i<Math.min(10, troopNames.length); i++){
-    const troop = troopNames[i];
-    if(!troop) continue;
-
-    let best = null;
-    let bestScore = -1;
+  // Target hanya berasal dari List User, bukan dari nama Socket 1-10.
+  // Untuk setiap nama socket, cari NAMA LAIN di List User yang paling sama.
+  // Nama socket sendiri dilarang menjadi target.
+  for(const socketName of socketNames){
+    const socketKey=normalizeTargetName(socketName);
+    let best=null;
+    let bestScore=0;
 
     for(const user of users){
-      const userKey = normalizeTargetName(user);
-      if(!userKey || used.has(userKey)) continue;
-      if(userKey === normalizeTargetName(troop)) continue;
+      const key=normalizeTargetName(user);
+      if(!key || key===socketKey || socketKeys.has(key) || used.has(key)) continue;
 
-      const score = targetSimilarity(troop, user);
-      if(score > bestScore){
-        bestScore = score;
-        best = user;
+      const score=targetNameSimilarity(socketName,user);
+      if(score>bestScore){
+        bestScore=score;
+        best=user;
       }
     }
 
-    if(best && bestScore > 0){
-      const key = normalizeTargetName(best);
+    if(best){
+      const key=normalizeTargetName(best);
       used.add(key);
-      selected.push(best);
+      nextTargets.push(best);
     }
   }
 
-  // Jangan hapus target lama jika pencarian tidak menghasilkan apa pun.
-  // Jika berhasil, hasil Auto Target menjadi daftar target baru secara atomik.
-  if(selected.length){
-    targets.length = 0;
-    selected.slice(0,10).forEach(n => {
-      if(!targets.includes(n)) targets.push(n);
-    });
-    renderTargets();
-  }
+  // Maksimal 10 target unik. Tidak mengisi slot dengan nama socket.
+  targets.length=0;
+  nextTargets.slice(0,10).forEach(n=>targets.push(n));
+  renderTargets();
 }
 
 function renderTargets(){
